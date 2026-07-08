@@ -5,7 +5,6 @@
     <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
     <title>赤壁市民生服务与民意反馈系统</title>
     <style>
-        /* 强制拉满视口，确保不管在什么网络层级下容器都不会坍塌 */
         html, body { width: 100% !important; height: 100% !important; margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
         #container { 
             position: fixed !important; 
@@ -14,7 +13,6 @@
             width: 100vw !important; 
             height: 100vh !important; 
             z-index: 1 !important; 
-            background-color: #fcf9f2 !important; /* 强制加入接近高德地图底色的浅黄浅灰，用来引导高德数据渲染 */
         }
         .panel { position: absolute; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); z-index: 999; }
         #filter-panel { top: 20px; left: 20px; width: 160px; }
@@ -26,14 +24,14 @@
         .form-group input, .form-group textarea { width: 92%; padding: 6px; }
     </style>
     
-    <!-- 1. 【核心大改动】：配置安全密钥，并加入高德官方针对混合环境调用所需的全局自适应强制变量 -->
+    <!-- 1. 率先配置正确的安全密钥 (Secret) —— 长的那串 -->
     <script type="text/javascript">
         window._AMapSecurityConfig = {
-            securityJsCode: '10553554f500626db2d30dcccf9446f5', 
+            securityJsCode: 'c87d03cad068927081bf2a0b07010b93', 
         }
     </script>
     
-    <!-- 2. 最经典的直接外链加载：让 GitHub 静态服务器用最优 https 证书去请求高德 -->
+    <!-- 2. 外链同步请求接口：拼接上正确的 Key —— 短的那串 -->
     <script type="text/javascript" src="https://amap.com"></script>
 </head>
 <body>
@@ -99,29 +97,21 @@
             ]
         };
 
-        // 3. 用高适应性的轮询保障函数拉起地图
+        // 异步等待页面完全挂载就绪后，激活地图
         window.addEventListener('load', function() {
-            var retryCount = 0;
             var checkAMap = setInterval(function() {
                 if (typeof AMap !== 'undefined' && AMap.Map) {
                     clearInterval(checkAMap);
                     initMapSystem();
-                } else {
-                    retryCount++;
-                    if(retryCount > 50) { // 超过5秒强制清空阻塞
-                        clearInterval(checkAMap);
-                        alert("高德云端底图数据被当前网络拦截，请尝试将电脑连接至手机热点网后再刷新网页！");
-                    }
                 }
-            }, 100);
+            }, 50);
         });
 
         function initMapSystem() {
-            // 初始化地图实例并强制覆盖鉴权漏洞
+            // 初始化地图，精准拉取赤壁市数字地图切片
             map = new AMap.Map('container', {
                 zoom: 13,
-                center: [113.900407, 29.724419],
-                forceVector: true // 【强效修复】：强制指示高德渲染最新矢量切片，不使用容易被封锁的旧栅格图片
+                center: [113.900407, 29.724419]
             });
 
             geocoder = new AMap.Geocoder({ city: "赤壁市" });
@@ -153,7 +143,7 @@
                 placeSearch.setCity(e.poi.adcode);
                 placeSearch.search(e.poi.name, function(status, result) {
                     if (status === 'complete' && result.poiList.pois.length > 0) {
-                        var firstPoi = result.poiList.pois[0]; 
+                        var firstPoi = result.poiList.pois[0]; // 修复层级错误
                         var lnglatStr = firstPoi.location.lng + ',' + firstPoi.location.lat;
                         document.getElementById('lnglat').value = lnglatStr;
                         document.getElementById('address-desc').value = firstPoi.address || firstPoi.name;
@@ -212,7 +202,7 @@
                 return;
             }
 
-            console.log("准备发送至核心数据库的数据：", { lnglat, address, issue });
+            console.log("准备提交的数据：", { lnglat, address, issue });
             alert(`提交成功！感谢您对赤壁市民生建设的支持。\n\n反馈地点：${address}\n具体问题：${issue}`);
             
             document.getElementById('lnglat').value = '';
