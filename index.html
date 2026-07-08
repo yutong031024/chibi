@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no, width=device-width">
+    <title>赤壁市民生服务与民意反馈系统</title>
+    <style>
+        /* 强制使 html、body 在双击本地打开时依然占满全屏 */
+        html, body { width: 100%; height: 100%; margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; }
+        
+        /* 绝对视口拉满逻辑：防止本地非 http 环境高度坍塌为 0 */
+        #container { 
+            position: absolute !important; 
+            top: 0 !important; 
+            bottom: 0 !important; 
+            left: 0 !important; 
+            right: 0 !important; 
+            width: 100% !important; 
+            height: 100% !important; 
+            z-index: 1 !important; 
+        }
+        
+        /* 浮动面板样式 */
+        .panel { position: absolute; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.15); z-index: 999; }
+        #filter-panel { top: 20px; left: 20px; width: 160px; }
+        #submit-panel { top: 20px; right: 20px; width: 280px; }
+        .panel h4 { margin: 0 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        .btn-group button { display: block; width: 100%; margin-bottom: 8px; padding: 6px; cursor: pointer; }
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; font-size: 13px; margin-bottom: 4px; }
+        .form-group input, .form-group textarea { width: 92%; padding: 6px; }
+    </style>
+    
+    <!-- 1. 率先配置双安全验证密码（防file协议熔断） -->
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: '10553554f500626db2d30dcccf9446f5', 
+        }
+    </script>
+</head>
+<body>
+
+    <!-- 地图实体渲染载体 -->
+    <div id="container"></div>
+
+    <!-- 左侧设施分类面板 -->
+    <div id="filter-panel" class="panel">
+        <h4>民生设施查看</h4>
+        <div class="btn-group">
+            <button onclick="showFacilities('medical')">🏥 医疗健康</button>
+            <button onclick="showFacilities('traffic')">🚌 交通出行</button>
+            <button onclick="showFacilities('business')">🛒 商业物流</button>
+            <button onclick="showFacilities('public')">🏛️ 公共设施</button>
+            <button onclick="clearMarkers()" style="background:#f5f5f5;">🧹 清除标记</button>
+        </div>
+    </div>
+
+    <!-- 右侧民意问题反馈面板 -->
+    <div id="submit-panel" class="panel">
+        <h4>📢 提交民生问题</h4>
+        <p style="font-size: 12px; color: #666; margin: 5px 0;">【使用提示】直接在地图上点击想反馈的位置，或在下方搜索。</p>
+        <div class="form-group">
+            <label>1. 搜索并定位地点</label>
+            <input type="text" id="tipinput" placeholder="输入关键字搜索，如：赤壁火车站">
+        </div>
+        <div class="form-group">
+            <label>2. 选定地点的经纬度</label>
+            <input type="text" id="lnglat" readonly placeholder="点击地图或搜索后自动生成">
+        </div>
+        <div class="form-group">
+            <label>3. 详细地址描述</label>
+            <input type="text" id="address-desc" placeholder="自动识别的地址...">
+        </div>
+        <div class="form-group">
+            <label>4. 遇到的具体问题</label>
+            <textarea id="issue-text" rows="3" placeholder="请详细说明您觉得不方便或存在隐患的地方..."></textarea>
+        </div>
+        <button onclick="submitIssue()" style="width:100%; padding: 8px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">确认提交</button>
+    </div>
+
+    <script type="text/javascript">
+        // 声明全局核心变量
+        var map, geocoder, auto, placeSearch;
+        var currentMarkers = [];
+        var feedbackMarker = null;
+
+        // 赤壁静态民生点位数据
+        const facilityData = {
+            medical: [
+                { name: "赤壁市人民医院", lnglat: [113.901511, 29.715016] },
+                { name: "赤壁市中医医院", lnglat: [113.896791, 29.727503] }
+            ],
+            traffic: [
+                { name: "赤壁北站(高铁站)", lnglat: [113.929851, 29.74853] },
+                { name: "赤壁火车站", lnglat: [113.882414, 29.709971] }
+            ],
+            business: [
+                { name: "新街口商业步行街", lnglat: [113.892971, 29.722513] }
+            ],
+            public: [
+                { name: "赤壁市图书馆", lnglat: [113.904838, 29.734188] },
+                { name: "赤壁人民广场", lnglat: [113.901164, 29.725838] }
+            ]
+        };
+
+        // 2. 本地 file 协议的核心突破点：利用唯一的全局初始化桥梁函数
+        window.initAMapBridge = function() {
+            try {
+                // 初始化地图并锁定赤壁
+                map = new AMap.Map('container', {
+                    zoom: 13,
+                    center: [113.900407, 29.724419]
+                });
+
+                // 同步注册高德地图专属高级插件
+                AMap.plugin(['AMap.Geocoder', 'AMap.AutoComplete', 'AMap.PlaceSearch'], function() {
+                    geocoder = new AMap.Geocoder({ city: "赤壁市" });
+                    auto = new AMap.AutoComplete({ input: "tipinput" });
+                    placeSearch = new AMap.PlaceSearch({ map: map });
+
+                    // 地图鼠标点击行为监听
+                    map.on('click', function(e) {
+                        var lnglatStr = e.lnglat.getLng() + ',' + e.lnglat.getLat();
+                        document.getElementById('lnglat').value = lnglatStr;
+                        
+                        if (feedbackMarker) {
+                            feedbackMarker.setPosition(e.lnglat);
+                        } else {
+                            feedbackMarker = new AMap.Marker({
+                                position: e.lnglat,
+                                icon: 'https://amap.com',
+                                map: map
+                            });
+                        }
+                        
+                        geocoder.getAddress(e.lnglat, function(status, result) {
+                            if (status === 'complete' && result.regeocode) {
+                                document.getElementById('address-desc').value = result.regeocode.formattedAddress;
+                            }
+                        });
+                    });
+
+                    // 搜索提示框行为监听
+                    auto.on("select", function(e) {
+                        placeSearch.setCity(e.poi.adcode);
+                        placeSearch.search(e.poi.name, function(status, result) {
+                            if (status === 'complete' && result.poiList.pois.length > 0) {
+                                var firstPoi = result.poiList.pois; 
+                                var lnglatStr = firstPoi.location.lng + ',' + firstPoi.location.lat;
+                                document.getElementById('lnglat').value = lnglatStr;
+                                document.getElementById('address-desc').value = firstPoi.address || firstPoi.name;
+                                
+                                if (feedbackMarker) {
+                                    feedbackMarker.setPosition(firstPoi.location);
+                                } else {
+                                    feedbackMarker = new AMap.Marker({
+                                        position: firstPoi.location,
+                                        icon: 'https://amap.com',
+                                        map: map
+                                    });
+                                }
+                                map.setCenter(firstPoi.location);
+                            }
+                        });
+                    });
+                });
+            } catch (err) {
+                console.error("本地握手失败，重新同步：", err);
+            }
+        };
+
+        // 3. 【强效本地自适应】：采用单路径纯净外链挂载，强行追加 callback 命令穿透 file 阻断
+        (function() {
+            var script = document.createElement('script');
+            script.type = 'text/javascript';
+            // 采用特殊的绝对协议外链，并将回调钩子指向上方的全局 initAMapBridge，彻底抹平本地跨域拦截
+            script.src = 'https://amap.com';
+            document.head.appendChild(script);
+        })();
+
+        // 展示图层标记
+        function showFacilities(type) {
+            if (!map) return;
+            clearMarkers();
+            const list = facilityData[type] || [];
+            list.forEach(item => {
+                var marker = new AMap.Marker({
+                    position: item.lnglat,
+                    title: item.name,
+                    map: map
+                });
+                marker.on('click', function() {
+                    var infoWindow = new AMap.InfoWindow({
+                        content: `<div style="padding:5px;"><b>${item.name}</b></div>`,
+                        offset: new AMap.Pixel(0, -30)
+                    });
+                    infoWindow.open(map, marker.getPosition());
+                });
+                currentMarkers.push(marker);
+            });
+            map.setFitView(currentMarkers);
+        }
+
+        function clearMarkers() {
+            if (map) {
+                map.remove(currentMarkers);
+                currentMarkers = [];
+            }
+        }
+
+        function submitIssue() {
+            const lnglat = document.getElementById('lnglat').value;
+            const address = document.getElementById('address-desc').value;
+            const issue = document.getElementById('issue-text').value;
+
+            if (!lnglat || !issue) {
+                alert("请先在地图上选定产生问题的地点，并填写具体问题！");
+                return;
+            }
+
+            console.log("拦截准备发送至核心数据库的数据流：", { lnglat, address, issue });
+            alert(`提交成功！感谢您对赤壁市民生建设的支持。\n\n反馈地点：${address}\n具体问题：${issue}`);
+            
+            document.getElementById('lnglat').value = '';
+            document.getElementById('address-desc').value = '';
+            document.getElementById('issue-text').value = '';
+            if (feedbackMarker) { map.remove(feedbackMarker); feedbackMarker = null; }
+        }
+    </script>
+</body>
+</html>
