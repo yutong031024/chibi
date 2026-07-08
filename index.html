@@ -25,14 +25,13 @@
     </style>
     
     <!-- 1. 率先配置正确的安全密钥 (Secret) —— 长的那串 -->
-    <script type="text/javascript">
-        window._AMapSecurityConfig = {
-            securityJsCode: 'c87d03cad068927081bf2a0b07010b93', 
-        }
-    </script>
-    
-    <!-- 2. 外链同步请求接口：拼接上正确的 Key —— 短的那串 -->
-    <script type="text/javascript" src="https://amap.com"></script>
+    <script>
+window._AMapSecurityConfig = {
+    securityJsCode: "c87d03cad068927081bf2a0b07010b93"
+};
+</script>
+
+<script src="https://webapi.amap.com/maps?v=2.0&key=083250db37c7858cc8e4b1a00145929e&plugin=AMap.AutoComplete,AMap.PlaceSearch,AMap.Geocoder"></script>
 </head>
 <body>
 
